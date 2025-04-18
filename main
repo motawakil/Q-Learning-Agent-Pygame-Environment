@@ -1,0 +1,176 @@
+import pygame
+import matplotlib.pyplot as plt
+from collections import deque
+from constants import *
+from environment import Environment
+from agent import QLearningAgent
+from menu import show_menu
+import time
+import pandas as pd
+
+
+# Initialize pygame
+pygame.init()
+
+
+# Create the screen
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+difficulty_level = show_menu(screen)
+pygame.display.set_caption("Q-Learning Agent")
+clock = pygame.time.Clock()
+
+
+
+
+
+def main():
+    env = Environment(difficulty_level)
+    agent = QLearningAgent(state_size=(GRID_WIDTH, GRID_HEIGHT), action_size=4)
+
+    num_episodes = 500
+    render_frequency = 5
+    running_rewards = deque(maxlen=20)
+    running_steps = deque(maxlen=20)
+    training_start_time = time.time()
+    font = pygame.font.SysFont('Arial', 24)
+
+    log_data = []  # ← pour stocker les logs de chaque épisode
+
+    for episode in range(num_episodes):
+        state = env.reset()
+        episode_reward = 0
+        render_this_episode = episode % render_frequency == 0
+        agent.epsilon_reset(episode, num_episodes)
+        episode_start_time = time.time()
+
+        episode_text = font.render(f"Episode: {episode+1}/{num_episodes}, ε: {agent.epsilon:.2f}", True, WHITE)
+
+        if render_this_episode:
+            screen.fill(BLACK)
+            screen.blit(episode_text, (SCREEN_WIDTH // 2 - 150, SCREEN_HEIGHT // 2))
+            pygame.display.flip()
+            pygame.time.delay(500)
+
+        while not env.done:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    return
+
+            if render_this_episode:
+                env.render()
+                screen.blit(episode_text, (10, 40))
+                pygame.display.flip()
+                pygame.time.delay(20)
+
+            action = agent.get_action(state)
+            next_state, reward, done = env.step(action)
+            agent.learn(state, action, reward, next_state, done)
+            state = next_state
+            episode_reward += reward
+            clock.tick(60)
+
+        goal_reached = env.agent_pos == env.goal_pos
+        agent.remember(episode_reward, env.steps, goal_reached)
+        running_rewards.append(episode_reward)
+        running_steps.append(env.steps)
+
+        goal_status = "GOAL!" if goal_reached else "TIMEOUT"
+        print(f"Episode: {episode+1}/{num_episodes}, {goal_status} Reward: {episode_reward:.1f}, "
+              f"Steps: {env.steps}, Epsilon: {agent.epsilon:.4f}")
+
+        # Mesurer la durée de l'épisode
+        episode_end_time = time.time()
+        episode_duration = round(episode_end_time - episode_start_time, 2)
+
+        # Sauvegarder les infos dans le log
+        log_data.append({
+            "Episode": episode + 1,
+            "Steps": env.steps,
+            "Reward": round(episode_reward, 2),
+            "Epsilon": round(agent.epsilon, 4),
+            "Result": goal_status,
+            "Duration": episode_duration
+        })
+
+        if render_this_episode:
+            env.render()
+            end_text = font.render(f"Episode Complete - {goal_status}", True,
+                                   GREEN if goal_reached else YELLOW)
+            screen.blit(end_text, (SCREEN_WIDTH // 2 - 150, SCREEN_HEIGHT // 2))
+            pygame.display.flip()
+            pygame.time.delay(500)
+
+        if (episode + 1) % 50 == 0:
+            agent.plot_performance()
+
+    # Fin entraînement
+    print("Training completed!")
+    training_end_time = time.time()
+    training_duration = training_end_time - training_start_time
+    print(f"⏱ Temps d'entraînement total : {training_duration:.2f} secondes")
+
+    # 🔽 Sauvegarder les logs dans un CSV
+
+    difficulty_map = {10: "facile", 20: "moyenne", 30: "difficile"}
+    filename = f"logs_{difficulty_map.get(difficulty_level, 'inconnu')}.csv"
+    pd.DataFrame(log_data).to_csv(filename, index=False)
+    print(f"📄 Logs enregistrés dans : {filename}")
+
+    # Test final
+    print("\nTesting learned policy...")
+    state = env.reset()
+    test_reward = 0
+    agent.epsilon = 0
+
+    screen.fill(BLACK)
+    test_text = font.render("Testing Learned Policy", True, WHITE)
+    screen.blit(test_text, (SCREEN_WIDTH // 2 - 120, SCREEN_HEIGHT // 2))
+    pygame.display.flip()
+    pygame.time.delay(1000)
+
+    while not env.done:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return
+
+        env.render()
+        test_status = font.render("Final Test Run", True, WHITE)
+        screen.blit(test_status, (10, 40))
+        pygame.display.flip()
+        pygame.time.delay(200)
+
+        action = agent.get_action(state)
+        next_state, reward, done = env.step(action)
+        state = next_state
+        test_reward += reward
+        clock.tick(30)
+
+    env.render()
+    goal_reached = env.agent_pos == env.goal_pos
+    result = "SUCCESS! Goal reached" if goal_reached else "FAILED to reach goal"
+    final_text = font.render(f"Test complete: {result}", True, GREEN if goal_reached else RED)
+    reward_text = font.render(f"Reward: {test_reward:.1f}, Steps: {env.steps}", True, WHITE)
+    screen.blit(final_text, (SCREEN_WIDTH // 2 - 200, SCREEN_HEIGHT // 2))
+    screen.blit(reward_text, (SCREEN_WIDTH // 2 - 150, SCREEN_HEIGHT // 2 + 30))
+    pygame.display.flip()
+    print(f"Test run completed: {result}")
+    print(f"Reward: {test_reward:.1f}, Steps: {env.steps}")
+
+    # 💾 Sauvegarder la Q-table
+    agent.save_q_table()
+
+    agent.plot_performance()
+
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                waiting = False
+        pygame.time.delay(100)
+
+    pygame.quit()
+
+if __name__ == "__main__":
+    main()
